@@ -7,7 +7,8 @@ FOREACH (SOURCE  ${sources})
     MESSAGE("PROCESSING THE FOLLOWING SOURCE FILES")
     MESSAGE(${SOURCE})
 
-    CMAKE_PATH(GET SOURCE PARENT_PATH target_name)
+    CMAKE_PATH(GET SOURCE PARENT_PATH TMP)
+    STRING(REPLACE "/" "-" target_name ${TMP})
     MESSAGE(${target_name})
     # Extract just the filename with extensions
     # cmake_path(GET SOURCE FILENAME file_name)
