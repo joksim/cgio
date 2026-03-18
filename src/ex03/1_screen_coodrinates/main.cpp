@@ -2,18 +2,37 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_video.h>
+#include <climits>
 #include <cmath>
-#include <vector>
 #include <ctime>
+#include <vector>
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
 
+
+/* We need two types of vertices */
+
+/* int vertices for screenspace coordinates */
 struct Vertex2i {
   int x;
   int y;
-  Vertex2i(int _x, int _y):x(_x),y(_y){}
+  Vertex2i(int _x, int _y) : x(_x), y(_y) {}
 };
 
+/* Float vertices for normal working */
+struct Vertex2f {
+  float x;
+  float y;
+  Vertex2f(float _x, float _y) : x(_x), y(_y) {}
+};
 
-std::vector<Vertex2i> points;
+/* This will currently serve as the main working points */
+std::vector<Vertex2f> points;
+
+/* Screenspace points will be used when transforming the vertices into
+ * screenspace coordinates
+*/
+std::vector<Vertex2i> screenspace_points;
 
 /* We will use this renderer to draw into this window every frame. */
 static SDL_Window *window = nullptr;
@@ -23,34 +42,52 @@ static Uint64 last_time = 0;
 int WIN_WIDTH = 600;
 int WIN_HEIGHT = 600;
 
+void gen_circle(const Vertex2f &center, float radius, int segments = 32) {
+  double angle = 0.0;
+  double angle_increment = 2*M_PI / segments;
 
-void gen_2d_points(uint32_t num_points) {
-  srand(std::time(0));
-  for (auto i=0; i<num_points; i++) {
-     points.emplace_back(rand()%WIN_WIDTH,rand()%WIN_HEIGHT);
+  for (auto i = 0; i <= segments; i++) {
+    points.emplace_back(center.x + radius * cos(angle),
+                        center.y + radius * sin(angle));
+    angle += angle_increment;
+  }
+}
+
+// Function to map the points into the screen coordinates
+void screen_coord(const std::vector<Vertex2f>& points, float left=-1.0f, float right=1.0f, float top=1.0f, float bottom=-1.0f) {
+  // Delete previous screenspace vertices
+  screenspace_points.clear();
+
+  // Do the transformation from the view into screen coordinates.
+  // SDL3 has the top-left as (0,0) and bottom-right as (width, height)
+  // so we will modify the equation for the y coordinate accordingly
+  for (auto p: points) {
+    float xs =  0+((p.x + 1) / (right-left)) * WIN_WIDTH;
+    float ys =  WIN_HEIGHT - ((p.y + 1) / (top-bottom)) * WIN_HEIGHT;
+
+    // Add the points to the screenspace coordinates array
+    screenspace_points.emplace_back(xs,ys);
   }
 }
 
 
-
-void line(const Vertex2i& a, const Vertex2i&b) {
-  int ax, ay, bx, by;
-  ax = a.x;
-  ay = a.y;
-  bx = b.x;
-  by = b.y;
-  bool steep = std::abs(ax-bx) < std::abs(ay-by);
+void line(const Vertex2i &a, const Vertex2i &b) {
+  int ax = a.x;
+  int ay = a.y;
+  int bx = b.x;
+  int by = b.y;
+  bool steep = std::abs(ax - bx) < std::abs(ay - by);
   if (steep) { // if the line is steep, we transpose the image
     std::swap(ax, ay);
     std::swap(bx, by);
   }
-  if (ax>bx) { // make it left−to−right
+  if (ax > bx) { // make it left−to−right
     std::swap(ax, bx);
     std::swap(ay, by);
   }
-  for (int x=ax; x<=bx; x++) {
-    float t = (x-ax) / static_cast<float>(bx-ax);
-    int y = std::round( ay + (by-ay)*t );
+  for (int x = ax; x <= bx; x++) {
+    float t = (x - ax) / static_cast<float>(bx - ax);
+    int y = std::round(ay + (by - ay) * t);
     if (steep) // if transposed, de−transpose
       SDL_RenderPoint(renderer, y, x);
     else
@@ -58,16 +95,19 @@ void line(const Vertex2i& a, const Vertex2i&b) {
   }
 }
 
+void line_loop(const std::vector<Vertex2f> &vertices, uint start_index = 0,
+               int num_points = -1) {
+  if (num_points < 0)
+    num_points = INT_MAX;
+  num_points = MIN(vertices.size(), num_points);
 
-void line_loop(const std::vector<Vertex2i>& vertices) {
-  int vector_size = vertices.size();
-  for (int i=0; i<vector_size-1; i++) {
-    line(vertices[i],vertices[i+1]);
+  screen_coord(vertices);
+
+  for (int i = 0; i < num_points - 1; i++) {
+    line(screenspace_points[start_index + i], screenspace_points[start_index + i + 1]);
   }
-  line(vertices[vector_size-1], vertices[0]);
+  line(screenspace_points[start_index + num_points - 1], screenspace_points[start_index]);
 }
-
-
 
 /* This function runs once at startup. */
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
@@ -108,7 +148,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
   // Destroy the icon surface
   SDL_DestroySurface(icon_surf);
 
-  gen_2d_points(3);
+  gen_circle(Vertex2f(0, 0), 0.7f, 36);
 
   // Record the time before the render loop starts
   last_time = SDL_GetTicks();
@@ -143,8 +183,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                          SDL_ALPHA_OPAQUE); /* white, full alpha */
 
   line_loop(points);
-
-
   SDL_RenderPresent(renderer); /* put it all on the screen! */
 
   return SDL_APP_CONTINUE; /* carry on with the program! */
